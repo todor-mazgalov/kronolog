@@ -4,6 +4,8 @@ A small, self-contained time-tracking web app. Log time against projects, see a
 monthly calendar of your entries, and a per-project hours breakdown. Everything is
 stored locally in your browser — no account, no server, no build step.
 
+**Live demo:** https://todor-mazgalov.github.io/kronolog/
+
 ## Run it
 
 Open `index.html` in any modern browser (double-click it, or serve the folder):
@@ -82,22 +84,6 @@ layer: migration from a localStorage-only install, dual-writes, and recovery fro
 IndexedDB after the localStorage cache is cleared. `test/run.js` runs both and is
 what `npm test` invokes. Each file can also be run directly, e.g.
 `node test/smoke.test.js`.
-
-## Hosting (GitHub Pages)
-
-The app is a single static `index.html` with no build step, so GitHub Pages can
-serve it directly:
-
-1. Push the repo to GitHub.
-2. **Settings → Pages → Build and deployment → Source: Deploy from a branch**,
-   then pick your default branch and the `/ (root)` folder.
-
-It then loads at `https://<user>.github.io/<repo>/`. All asset references are
-absolute (Google Fonts, the Ko-fi link) or inline (the favicon is a data URI), so
-it works correctly under a project subpath — no `<base>` tag needed. A `.nojekyll`
-file is included so Pages serves every file verbatim (no Jekyll processing). The
-`test/`, `package.json`, and `node_modules` paths are harmless if published but
-aren't referenced by the page.
 
 ## License
 
