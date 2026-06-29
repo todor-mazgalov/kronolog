@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kronolog — Time tracking</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  input,button,textarea,select{font-family:inherit}
+  input:focus,textarea:focus{outline:none}
+  ::placeholder{opacity:.5}
+  textarea{font-size:13px}
+  @media (max-width:760px){
+    #layout{grid-template-columns:1fr !important}
+    #formCard{position:static !important}
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+"use strict";
+(function () {
+  // ---- Project color palettes --------------------------------------------
+  var PALETTE_NAMES = ['vivid', 'pastel', 'earthy', 'sunset', 'cool', 'candy'];
+  var PALETTES = {
+    vivid:  ['#6366f1','#ec4899','#14b8a6','#f59e0b','#8b5cf6','#ef4444','#0ea5e9','#84cc16','#f43f5e','#a855f7'],
+    pastel: ['#7c9ad9','#e79bb6','#74c7bd','#f0c074','#b39ad6','#ec9a94','#7fbfdc','#a9cf8a','#e7a0ad','#c4a3dd'],
+    earthy: ['#b5713f','#7a8b5a','#c9a14a','#9c5f4e','#5f7a72','#caa86b','#86694a','#a98b5e','#6e8b7b','#b08968'],
+    sunset: ['#ef6f53','#f4a259','#e8c468','#d96c75','#c25b8c','#8a5a83','#f08a5d','#e36f7b','#d98c5f','#bc6c8e'],
+    cool:   ['#3b82f6','#06b6d4','#10b981','#6366f1','#8b5cf6','#0ea5e9','#14b8a6','#22c55e','#4f46e5','#7c3aed'],
+    candy:  ['#ff6b9d','#feca57','#48dbfb','#1dd1a1','#5f27cd','#ff9ff3','#54a0ff','#00d2d3','#ff6348','#c56cf0']
+  };
+  function activePalette() { return PALETTES[state.palette] || PALETTES[DEFAULT_PALETTE]; }
+
+  // Theme order shown in the settings picker.
+  var THEME_NAMES = ['warm', 'ocean', 'forest', 'plum', 'slate', 'rose'];
+  // Each theme supplies only colors; shape/typography come from a shared base.
+  function themes() {
+    var base = {
+      radius: 14,
+      font: "'Nunito',system-ui,sans-serif",
+      headFont: "'Nunito',system-ui,sans-serif",
+      shadow: '0 2px 12px rgba(0,0,0,.06)'
+    };
+    var colors = {
+      warm:   { appBg:'#f6efe4', card:'#fffdf9', ink:'#3a2f25', muted:'#a8957f', border:'#ece0cf', accent:'#d4885a', accentInk:'#ffffff', inputBg:'#fffdf9', cellBg:'#fffdf9', cellOut:'#f8f1e6', track:'#f1e6d6' },
+      ocean:  { appBg:'#eef3f6', card:'#ffffff', ink:'#1b2e3a', muted:'#7d96a3', border:'#dde7ec', accent:'#2b8aa8', accentInk:'#ffffff', inputBg:'#ffffff', cellBg:'#ffffff', cellOut:'#f4f8fa', track:'#e3edf1' },
+      forest: { appBg:'#eef2ec', card:'#ffffff', ink:'#22302a', muted:'#809289', border:'#dde6df', accent:'#3f8f6b', accentInk:'#ffffff', inputBg:'#ffffff', cellBg:'#ffffff', cellOut:'#f4f7f3', track:'#e4ece6' },
+      plum:   { appBg:'#f3eef4', card:'#fffdff', ink:'#322336', muted:'#998a9d', border:'#e7dce9', accent:'#8e4ea3', accentInk:'#ffffff', inputBg:'#fffdff', cellBg:'#fffdff', cellOut:'#f7f2f8', track:'#ece1ee' },
+      slate:  { appBg:'#eef0f4', card:'#ffffff', ink:'#222730', muted:'#858d9c', border:'#e0e4ec', accent:'#4f5d9e', accentInk:'#ffffff', inputBg:'#ffffff', cellBg:'#ffffff', cellOut:'#f5f6fa', track:'#e5e8f0' },
+      rose:   { appBg:'#f8eef0', card:'#fffcfd', ink:'#3a2429', muted:'#b08c93', border:'#efdce0', accent:'#cf5b73', accentInk:'#ffffff', inputBg:'#fffcfd', cellBg:'#fffcfd', cellOut:'#fbf2f4', track:'#f3e1e5' }
+    };
+    var out = {};
+    for (var k in colors) { if (colors.hasOwnProperty(k)) out[k] = Object.assign({}, base, colors[k]); }
+    return out;
+  }
+
+  function styles(T) {
+    var r = T.radius + 'px';
+    var ri = Math.min(T.radius, 10) + 'px';
+    var ff = 'font-family:' + T.font + ';';
+    var inputBase = 'width:100%;background:' + T.inputBg + ';border:1px solid ' + T.border + ';border-radius:' + ri + ';padding:9px 10px;font-size:13px;color:' + T.ink + ';';
+    return {
+      app: ff + 'min-height:100vh;background:' + T.appBg + ';color:' + T.ink + ';padding:26px 28px;',
+      header: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:22px;flex-wrap:wrap;gap:14px;',
+      brand: 'font-family:' + T.headFont + ';font-weight:700;font-size:21px;letter-spacing:-.01em;',
+      layout: 'display:grid;grid-template-columns:minmax(280px,322px) 1fr;gap:20px;align-items:start;',
+      card: 'background:' + T.card + ';border:1px solid ' + T.border + ';border-radius:' + r + ';padding:18px;box-shadow:' + T.shadow + ';',
+      formCard: 'background:' + T.card + ';border:1px solid ' + T.border + ';border-radius:' + r + ';padding:18px;box-shadow:' + T.shadow + ';position:sticky;top:26px;',
+      cardTitle: 'font-family:' + T.headFont + ';font-weight:700;font-size:15px;',
+      field: 'display:flex;flex-direction:column;gap:6px;',
+      label: 'font-size:12px;font-weight:600;color:' + T.muted + ';display:flex;justify-content:space-between;gap:8px;',
+      opt: 'font-weight:400;font-style:italic;opacity:.75;',
+      input: inputBase,
+      textarea: inputBase + 'min-height:58px;resize:vertical;line-height:1.4;',
+      dash: 'font-size:12px;color:' + T.muted + ';',
+      addBtn: 'margin-top:2px;width:100%;background:' + T.accent + ';color:' + T.accentInk + ';border:none;border-radius:' + ri + ';padding:11px;font-weight:700;font-size:14px;cursor:pointer;',
+      error: 'color:#e0524b;font-size:12px;font-weight:600;',
+      calHead: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap;',
+      navBtn: 'width:30px;height:30px;border-radius:' + ri + ';border:1px solid ' + T.border + ';background:' + T.inputBg + ';color:' + T.ink + ';font-size:16px;cursor:pointer;line-height:1;',
+      exportBtn: 'padding:7px 12px;border-radius:' + ri + ';border:1px solid ' + T.border + ';background:transparent;color:' + T.ink + ';font-size:12px;font-weight:600;cursor:pointer;',
+      weekRow: 'display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px;',
+      weekCell: 'font-size:11px;font-weight:600;color:' + T.muted + ';text-align:center;text-transform:uppercase;letter-spacing:.04em;',
+      grid: 'display:grid;grid-template-columns:repeat(7,1fr);gap:6px;',
+      cellHead: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;',
+      cellTotal: 'font-size:10px;color:' + T.muted + ';font-weight:700;',
+      totalPill: 'font-size:13px;font-weight:700;color:' + T.muted + ';',
+      barName: 'width:96px;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;',
+      barTrack: 'flex:1;height:18px;background:' + T.track + ';border-radius:5px;overflow:hidden;',
+      barVal: 'width:52px;text-align:right;font-size:12.5px;font-weight:700;font-variant-numeric:tabular-nums;',
+      empty: 'color:' + T.muted + ';font-size:13px;padding:14px 0 6px;',
+      notice: 'font-size:11px;font-weight:700;color:' + T.accentInk + ';background:' + T.accent + ';padding:3px 9px;border-radius:' + ri + ';white-space:nowrap;',
+      segActive: 'padding:4px 10px;border-radius:' + ri + ';font-size:11px;font-weight:700;cursor:pointer;border:1px solid ' + T.accent + ';background:' + T.accent + ';color:' + T.accentInk + ';',
+      segIdle: 'padding:4px 10px;border-radius:' + ri + ';font-size:11px;font-weight:600;cursor:pointer;border:1px solid ' + T.border + ';background:transparent;color:' + T.muted + ';',
+      projChip: 'display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:' + ri + ';font-size:11.5px;font-weight:600;cursor:pointer;border:1px solid ' + T.border + ';background:transparent;color:' + T.ink + ';',
+      projChipActive: 'display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:' + ri + ';font-size:11.5px;font-weight:700;cursor:pointer;border:1px solid ' + T.accent + ';background:transparent;color:' + T.accent + ';',
+      overlay: 'position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;z-index:50;padding:20px;',
+      dialog: 'font-family:' + T.font + ';background:' + T.card + ';border:1px solid ' + T.border + ';border-radius:' + r + ';padding:22px;width:380px;max-width:100%;box-shadow:0 20px 60px rgba(0,0,0,.28);color:' + T.ink + ';',
+      dlgTitle: 'font-family:' + T.headFont + ';font-weight:700;font-size:17px;',
+      dlgText: 'font-size:13px;color:' + T.muted + ';line-height:1.5;margin-top:8px;',
+      toggleRow: 'display:flex;justify-content:space-between;align-items:center;gap:14px;border:1px solid ' + T.border + ';border-radius:' + ri + ';padding:11px 13px;margin:16px 0 4px;',
+      toggleLabel: 'font-size:13px;font-weight:700;',
+      toggleSub: 'font-size:11.5px;color:' + T.muted + ';margin-top:2px;',
+      btnRow: 'display:flex;justify-content:flex-end;gap:8px;margin-top:14px;',
+      cancelBtn: 'padding:9px 16px;border-radius:' + ri + ';border:1px solid ' + T.border + ';background:transparent;color:' + T.ink + ';font-size:13px;font-weight:600;cursor:pointer;',
+      primaryBtn: 'padding:9px 16px;border-radius:' + ri + ';border:none;background:' + T.accent + ';color:' + T.accentInk + ';font-size:13px;font-weight:700;cursor:pointer;',
+      dangerBtn: 'padding:9px 16px;border-radius:' + ri + ';border:none;background:#e0524b;color:#fff;font-size:13px;font-weight:700;cursor:pointer;'
+    };
+  }
+
+  // ---- Helpers -----------------------------------------------------------
+  function pad(n) { return String(n).padStart(2, '0'); }
+  function fmt(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function round2(n) { return Math.round(n * 100) / 100; }
+  function diffHours(start, end) {
+    if (!start || !end) return 0;
+    var a = start.split(':').map(Number), b = end.split(':').map(Number);
+    var mins = (b[0] * 60 + b[1]) - (a[0] * 60 + a[1]);
+    if (mins < 0) mins += 1440;
+    return mins / 60;
+  }
+
+  // Brand mark: a clock-face circle on an accent squircle, with a "K" whose
+  // strokes read as clock hands radiating from a center hub. Used for the header
+  // logo and (data-URI encoded) the favicon, so both stay in sync.
+  // `px` null => size-less SVG that scales to any favicon size.
+  function logoSvg(px, accent) {
+    var a = accent || (typeof T !== 'undefined' ? T.accent : '#d4885a');
+    var dim = px ? 'width="' + px + '" height="' + px + '" ' : '';
+    return '<svg ' + dim + 'viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">' +
+      '<rect x="3" y="3" width="58" height="58" rx="19" fill="' + a + '"/>' +
+      '<circle cx="32" cy="32" r="19" fill="none" stroke="#fff" stroke-width="3"/>' +
+      // clock ticks at 12 / 3 / 6 / 9 to read as a clock face
+      '<g stroke="#fff" stroke-width="2.5" stroke-linecap="round">' +
+        '<path d="M32 13.5V16"/><path d="M32 48V50.5"/>' +
+        '<path d="M48 32H50.5"/><path d="M13.5 32H16"/>' +
+      '</g>' +
+      // centered "K"
+      '<g fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M26 21V43"/>' +
+        '<path d="M26 32L39 21"/>' +
+        '<path d="M26 32L39 43"/>' +
+      '</g>' +
+    '</svg>';
+  }
+
+  // ---- State -------------------------------------------------------------
+  var STORE = 'tt_entries_v1', HIDE = 'tt_hidden_v1', WORK = 'tt_workday_v1', THEME = 'tt_theme', PALETTE = 'tt_palette';
+  var DEFAULT_WORKDAY = 8, DEFAULT_THEME = 'warm', DEFAULT_PALETTE = 'vivid';
+
+  // ---- Storage -----------------------------------------------------------
+  // Primary store is IndexedDB (larger quota, resists eviction once persisted).
+  // localStorage is kept as a synchronous boot cache + migration source, and is
+  // the sole store on browsers/contexts where IndexedDB is unavailable.
+  var idb = null;          // open IDBDatabase, or null if unavailable
+  var localDirty = false;  // did the user mutate data before IDB finished opening?
+
+  function load(key) { try { return JSON.parse(localStorage.getItem(key)) || []; } catch (e) { return []; } }
+  function persist(key, val) {
+    localDirty = true;
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+    idbSet(key, val);
+  }
+  function loadWorkday() {
+    var n;
+    try { n = parseFloat(localStorage.getItem(WORK)); } catch (e) {}
+    return (n > 0) ? n : DEFAULT_WORKDAY;
+  }
+  function loadTheme() {
+    var t;
+    try { t = JSON.parse(localStorage.getItem(THEME)); } catch (e) {}
+    return themes()[t] ? t : DEFAULT_THEME;
+  }
+  function loadPalette() {
+    var p;
+    try { p = JSON.parse(localStorage.getItem(PALETTE)); } catch (e) {}
+    return PALETTES[p] ? p : DEFAULT_PALETTE;
+  }
+
+  function idbOpen() {
+    return new Promise(function (res, rej) {
+      try {
+        if (!('indexedDB' in window) || !window.indexedDB) return rej(new Error('no indexedDB'));
+        var req = window.indexedDB.open('kronolog', 1);
+        req.onupgradeneeded = function () { req.result.createObjectStore('kv'); };
+        req.onsuccess = function () { res(req.result); };
+        req.onerror = function () { rej(req.error || new Error('open failed')); };
+      } catch (e) { rej(e); }
+    });
+  }
+  function idbSet(key, val) {
+    if (!idb) return;
+    try { idb.transaction('kv', 'readwrite').objectStore('kv').put(val, key); } catch (e) {}
+  }
+  function idbGet(key) {
+    return new Promise(function (res) {
+      if (!idb) return res(undefined);
+      try {
+        var r = idb.transaction('kv', 'readonly').objectStore('kv').get(key);
+        r.onsuccess = function () { res(r.result); };
+        r.onerror = function () { res(undefined); };
+      } catch (e) { res(undefined); }
+    });
+  }
+  // Open IDB, request durable storage, then migrate-or-adopt. Runs after the
+  // first paint (which used the localStorage cache) so startup is never blocked.
+  function initStorage() {
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+    return idbOpen().then(function (db) {
+      idb = db;
+      return idbGet(STORE);
+    }).then(function (stored) {
+      if (stored === undefined || localDirty) {
+        // Fresh IDB, or the user already edited during boot: localStorage cache
+        // wins — push the current in-memory state into IDB.
+        idbSet(STORE, state.entries);
+        idbSet(HIDE, state.hidden);
+        idbSet(WORK, state.workday);
+        idbSet(THEME, state.theme);
+        idbSet(PALETTE, state.palette);
+        return;
+      }
+      // Adopt IDB as the source of truth and refresh the views.
+      return Promise.all([idbGet(HIDE), idbGet(WORK), idbGet(THEME), idbGet(PALETTE)]).then(function (r) {
+        state.entries = Array.isArray(stored) ? stored : [];
+        state.hidden = Array.isArray(r[0]) ? r[0] : [];
+        if (r[1] > 0) state.workday = r[1];
+        if (themes()[r[2]]) state.theme = r[2];
+        if (PALETTES[r[3]]) state.palette = r[3];
+        try {
+          localStorage.setItem(STORE, JSON.stringify(state.entries));
+          localStorage.setItem(HIDE, JSON.stringify(state.hidden));
+          localStorage.setItem(WORK, JSON.stringify(state.workday));
+          localStorage.setItem(THEME, JSON.stringify(state.theme));
+          localStorage.setItem(PALETTE, JSON.stringify(state.palette));
+        } catch (e) {}
+        rebuildUI();
+      });
+    }).catch(function () { /* IndexedDB unavailable — localStorage stays primary */ });
+  }
+
+  var today = new Date();
+  var state = {
+    entries: load(STORE),
+    hidden: load(HIDE),
+    theme: loadTheme(),
+    palette: loadPalette(),
+    timeMode: 'duration',                              // 'duration' | 'range'
+    workday: loadWorkday(),                            // target hours per day
+    ym: { y: today.getFullYear(), m: today.getMonth() },
+    error: '',
+    notice: '',
+    confirmProject: null,
+    confirmDelete: false,
+    configOpen: false
+  };
+  var noticeTimer = null;
+
+  var T = themes()[state.theme];
+  var s = styles(T);
+  var RI = Math.min(T.radius, 10);
+
+  // Persistent references to form inputs (uncontrolled — read on submit).
+  var els = {};
+  var rootBound = false;  // delegated listeners bind once; survive shell rebuilds
+
+  // ---- Derived data ------------------------------------------------------
+  function projectColorMap() {
+    var names = Array.from(new Set(state.entries.map(function (e) { return e.project; }))).sort();
+    var pal = activePalette();
+    var map = {};
+    names.forEach(function (n, i) { map[n] = pal[i % pal.length]; });
+    return { names: names, map: map };
+  }
+
+  // ---- Mutations ---------------------------------------------------------
+  function flashNotice(msg) {
+    state.notice = msg;
+    renderCalendarHead();
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(function () { state.notice = ''; renderCalendarHead(); }, 2600);
+  }
+
+  function setError(msg) { state.error = msg; renderError(); }
+
+  function addEntry() {
+    var project = els.project.value.trim();
+    if (!project) { setError('Project is required'); return; }
+    var startVal = els.start ? els.start.value : '';
+    var endVal = els.end ? els.end.value : '';
+    var hoursVal = els.hours ? els.hours.value : '';
+    var hours = state.timeMode === 'duration'
+      ? (parseFloat(hoursVal) || 0)
+      : diffHours(startVal, endVal);
+    if (!hours || hours <= 0) { setError('Enter a valid time'); return; }
+
+    var entry = {
+      id: Date.now() + Math.random(),
+      date: els.date.value,
+      project: project,
+      ticket: els.ticket.value.trim(),
+      description: els.description.value.trim(),
+      tags: els.tags.value.split(',').map(function (t) { return t.trim(); }).filter(Boolean),
+      hours: round2(hours),
+      start: startVal,
+      end: endVal
+    };
+    state.entries = state.entries.concat([entry]);
+    state.hidden = state.hidden.filter(function (h) { return h !== entry.project; });
+    persist(STORE, state.entries);
+    persist(HIDE, state.hidden);
+
+    // Clear the per-entry fields (date is kept). Time inputs vary by mode.
+    els.project.value = ''; els.ticket.value = ''; els.description.value = '';
+    els.tags.value = '';
+    if (els.hours) els.hours.value = '';
+    if (els.start) els.start.value = '';
+    if (els.end) els.end.value = '';
+    state.error = '';
+    renderError();
+    renderChips();
+    renderCalendar();
+    renderChart();
+  }
+
+  function deleteEntry(id) {
+    state.entries = state.entries.filter(function (e) { return String(e.id) !== String(id); });
+    persist(STORE, state.entries);
+    renderChips();
+    renderCalendar();
+    renderChart();
+  }
+
+  function pickProject(name) { els.project.value = name; state.error = ''; renderError(); renderChips(); }
+
+  function removeProject(name) { state.confirmProject = name; state.confirmDelete = false; renderDialog(); }
+  function cancelRemove() { state.confirmProject = null; renderDialog(); }
+  function toggleDelete() { state.confirmDelete = !state.confirmDelete; renderDialog(); }
+  function confirmRemove() {
+    var name = state.confirmProject;
+    if (state.confirmDelete) {
+      state.entries = state.entries.filter(function (e) { return e.project !== name; });
+      state.hidden = state.hidden.filter(function (h) { return h !== name; });
+      persist(STORE, state.entries);
+      persist(HIDE, state.hidden);
+    } else {
+      state.hidden = Array.from(new Set(state.hidden.concat([name])));
+      persist(HIDE, state.hidden);
+    }
+    if (els.project.value === name) els.project.value = '';
+    state.confirmProject = null;
+    renderDialog();
+    renderChips();
+    renderCalendar();
+    renderChart();
+  }
+
+  function prevMonth() { var y = state.ym.y, m = state.ym.m - 1; if (m < 0) { m = 11; y--; } state.ym = { y: y, m: m }; renderCalendar(); renderChart(); }
+  function nextMonth() { var y = state.ym.y, m = state.ym.m + 1; if (m > 11) { m = 0; y++; } state.ym = { y: y, m: m }; renderCalendar(); renderChart(); }
+  function goToday() { var d = new Date(); state.ym = { y: d.getFullYear(), m: d.getMonth() }; renderCalendar(); renderChart(); }
+
+  function setTimeMode(mode) { state.timeMode = mode; state.error = ''; renderTimeArea(); renderError(); }
+
+  // ---- Theme + settings --------------------------------------------------
+  // Recompute the active theme's styles and rebuild the whole UI, preserving
+  // any in-progress form input across the rebuild.
+  function captureForm() {
+    return {
+      project: els.project ? els.project.value : '',
+      ticket: els.ticket ? els.ticket.value : '',
+      date: els.date ? els.date.value : '',
+      description: els.description ? els.description.value : '',
+      tags: els.tags ? els.tags.value : '',
+      hours: els.hours ? els.hours.value : '',
+      start: els.start ? els.start.value : '',
+      end: els.end ? els.end.value : '',
+      cfgWorkday: els.workdayInput ? els.workdayInput.value : null
+    };
+  }
+  function restoreForm(f) {
+    if (!f) return;
+    if (els.project) els.project.value = f.project;
+    if (els.ticket) els.ticket.value = f.ticket;
+    if (els.date && f.date) els.date.value = f.date;
+    if (els.description) els.description.value = f.description;
+    if (els.tags) els.tags.value = f.tags;
+    if (els.hours) els.hours.value = f.hours;
+    if (els.start) els.start.value = f.start;
+    if (els.end) els.end.value = f.end;
+    if (els.workdayInput && f.cfgWorkday != null) els.workdayInput.value = f.cfgWorkday;
+    renderChips();
+  }
+  function rebuildUI() {
+    T = themes()[state.theme] || themes()[DEFAULT_THEME];
+    s = styles(T);
+    RI = Math.min(T.radius, 10);
+    var snap = captureForm();
+    setFavicon();
+    buildShell();
+    renderChips(); renderTimeArea(); renderError(); renderCalendar(); renderChart(); renderDialog(); renderConfig();
+    restoreForm(snap);
+  }
+  function setTheme(name) {
+    if (!themes()[name] || name === state.theme) return;
+    state.theme = name;
+    persist(THEME, name);
+    rebuildUI();
+  }
+  function setPalette(name) {
+    if (!PALETTES[name] || name === state.palette) return;
+    state.palette = name;
+    persist(PALETTE, name);
+    rebuildUI();
+  }
+
+  // ---- Workday config ----------------------------------------------------
+  function openConfig() { state.configOpen = true; renderConfig(); }
+  function closeConfig() { state.configOpen = false; renderConfig(); }
+  function saveConfig() {
+    var n = parseFloat(els.workdayInput ? els.workdayInput.value : '');
+    if (!(n > 0) || n > 24) { if (els.configError) els.configError.innerHTML = '<div style="' + esc(s.error) + '">Enter hours between 0 and 24.</div>'; return; }
+    state.workday = round2(n);
+    persist(WORK, state.workday);
+    state.configOpen = false;
+    renderConfig();
+    renderCalendar();
+  }
+
+  // ---- Export / import ---------------------------------------------------
+  function download(filename, blob) {
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+  function exportCsv() {
+    var head = ['Date', 'Project', 'Ticket', 'Description', 'Tags', 'Hours', 'Start', 'End'];
+    var rows = [head];
+    state.entries.slice().sort(function (a, b) { return a.date.localeCompare(b.date); }).forEach(function (e) {
+      rows.push([e.date, e.project, e.ticket, e.description, (e.tags || []).join('; '), e.hours, e.start || '', e.end || '']);
+    });
+    var cell = function (c) { c = String(c == null ? '' : c); return /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c; };
+    var csv = rows.map(function (r) { return r.map(cell).join(','); }).join('\n');
+    download('timesheet.csv', new Blob([csv], { type: 'text/csv' }));
+  }
+  function exportJson() {
+    var data = { version: 1, exportedAt: new Date().toISOString(), entries: state.entries, hidden: state.hidden };
+    download('timesheet-backup.json', new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  }
+  function triggerImport() { els.file.click(); }
+  function importJson(ev) {
+    var file = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(reader.result);
+        var imported = Array.isArray(data) ? data : (data.entries || []);
+        if (!Array.isArray(imported)) throw new Error('bad');
+        var map = {};
+        state.entries.forEach(function (en) { map[en.id] = en; });
+        var added = 0;
+        imported.forEach(function (en) {
+          if (en && en.project && en.date) {
+            var id = (en.id != null) ? en.id : (Date.now() + Math.random());
+            if (!(id in map)) {
+              map[id] = {
+                id: id, date: en.date, project: String(en.project),
+                ticket: en.ticket || '', description: en.description || '',
+                tags: Array.isArray(en.tags) ? en.tags : (en.tags ? String(en.tags).split(',').map(function (t) { return t.trim(); }).filter(Boolean) : []),
+                hours: Number(en.hours) || 0, start: en.start || '', end: en.end || ''
+              };
+              added++;
+            }
+          }
+        });
+        state.entries = Object.keys(map).map(function (k) { return map[k]; });
+        if (data && Array.isArray(data.hidden)) {
+          state.hidden = Array.from(new Set(state.hidden.concat(data.hidden)));
+        }
+        persist(STORE, state.entries);
+        persist(HIDE, state.hidden);
+        renderChips(); renderCalendar(); renderChart();
+        flashNotice('Imported ' + added + ' ' + (added === 1 ? 'entry' : 'entries'));
+      } catch (err) {
+        flashNotice('Invalid backup file');
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ---- Rendering ---------------------------------------------------------
+  function chipsHtml() {
+    var pc = projectColorMap();
+    var visible = pc.names.filter(function (n) { return state.hidden.indexOf(n) === -1; });
+    if (!visible.length) return '';
+    var current = els.project ? els.project.value : '';
+    var xStyle = 'cursor:pointer;font-size:15px;line-height:1;opacity:.45;font-weight:700;margin-left:1px;';
+    var items = visible.map(function (n) {
+      var chipStyle = (current === n) ? s.projChipActive : s.projChip;
+      var dot = 'width:8px;height:8px;border-radius:2px;flex:none;background:' + pc.map[n] + ';';
+      return '<div style="' + esc(chipStyle) + '">' +
+        '<span data-action="pickProject" data-name="' + esc(n) + '" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">' +
+        '<span style="' + esc(dot) + '"></span>' + esc(n) + '</span>' +
+        '<span data-action="removeProject" data-name="' + esc(n) + '" title="Remove project and its entries" style="' + esc(xStyle) + '">&times;</span>' +
+        '</div>';
+    }).join('');
+    return '<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:1px">' + items + '</div>';
+  }
+
+  function renderChips() { if (els.chips) els.chips.innerHTML = chipsHtml(); }
+
+  function renderError() {
+    if (!els.error) return;
+    els.error.innerHTML = state.error ? '<div style="' + esc(s.error) + '">' + esc(state.error) + '</div>' : '';
+  }
+
+  function renderTimeArea() {
+    // Mode toggle buttons
+    els.timeModes.innerHTML = [
+      { k: 'duration', label: 'Duration' },
+      { k: 'range', label: 'Start–End' }
+    ].map(function (o) {
+      var st = (o.k === state.timeMode) ? s.segActive : s.segIdle;
+      return '<button data-action="timeMode" data-mode="' + o.k + '" style="' + esc(st) + '">' + o.label + '</button>';
+    }).join('');
+
+    // Inputs for the active mode (preserve any typed values)
+    var cur = {
+      hours: els.hours ? els.hours.value : '',
+      start: els.start ? els.start.value : '',
+      end: els.end ? els.end.value : ''
+    };
+    if (state.timeMode === 'duration') {
+      els.timeInputs.innerHTML =
+        '<input data-field="hours" placeholder="Hours, e.g. 2.5" style="' + esc(s.input) + '">';
+    } else {
+      els.timeInputs.innerHTML =
+        '<div style="display:flex;gap:8px;align-items:center">' +
+        '<input data-field="start" type="time" style="' + esc(s.input) + '">' +
+        '<span style="' + esc(s.dash) + '">to</span>' +
+        '<input data-field="end" type="time" style="' + esc(s.input) + '">' +
+        '</div>';
+    }
+    // Re-bind references and restore values
+    els.hours = els.timeInputs.querySelector('[data-field="hours"]');
+    els.start = els.timeInputs.querySelector('[data-field="start"]');
+    els.end = els.timeInputs.querySelector('[data-field="end"]');
+    if (els.hours) els.hours.value = cur.hours;
+    if (els.start) els.start.value = cur.start;
+    if (els.end) els.end.value = cur.end;
+  }
+
+  // Background fill for a day cell, proportional to logged hours vs. the workday
+  // target. A translucent accent fill grows from the bottom of the cell to full
+  // height at the target; overtime beyond the target is layered on top as a
+  // diagonal striped overlay that also grows up from the bottom (capped at full
+  // cell height). Both layers are pointer-transparent so chips stay clickable.
+  function dayFillLayers(total) {
+    var wd = state.workday || DEFAULT_WORKDAY;
+    var fillFrac = Math.min(1, total / wd);
+    var overFrac = total > wd ? Math.min(1, (total - wd) / wd) : 0;
+    var baseFill = 'color-mix(in srgb, ' + T.accent + ' 32%, transparent)';
+    // Accent fill growing left to right; its width is the share of the workday
+    // logged (4h of 8h fills the left half of the cell, 8h fills it fully).
+    var fill = 'position:absolute;left:0;top:0;bottom:0;width:' + round2(fillFrac * 100) +
+      '%;background:' + baseFill + ';pointer-events:none;';
+    var html = '<div style="' + esc(fill) + '"></div>';
+    if (overFrac > 0) {
+      // Overtime: accent-colored diagonal stripes growing left to right, their
+      // width being the overtime as a share of the workday (2h over an 8h day =
+      // 25% striped), capped at the full cell width. Kept pale (low opacity) so
+      // entry chips and the day total stay readable underneath.
+      var stripeCol = 'color-mix(in srgb, ' + T.accent + ' 38%, transparent)';
+      var stripes = 'position:absolute;left:0;top:0;bottom:0;width:' + round2(overFrac * 100) +
+        '%;pointer-events:none;background-image:repeating-linear-gradient(45deg,' + stripeCol + ' 0,' +
+        stripeCol + ' 3px,transparent 3px,transparent 8px);';
+      html += '<div style="' + esc(stripes) + '"></div>';
+    }
+    return html;
+  }
+  function dayTip(total) {
+    var wd = state.workday || DEFAULT_WORKDAY;
+    return round2(total) + 'h of ' + round2(wd) + 'h' + (total > wd ? ' (+' + round2(total - wd) + 'h over)' : '');
+  }
+
+  function buildCells() {
+    var pc = projectColorMap();
+    var wd = state.workday || DEFAULT_WORKDAY;
+    var y = state.ym.y, m = state.ym.m;
+    var offset = (new Date(y, m, 1).getDay() + 6) % 7;
+    var todayStr = fmt(new Date());
+    var chipBase = 'padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;line-height:1.5;';
+    var cells = [];
+    for (var i = 0; i < 42; i++) {
+      var d = new Date(y, m, 1 - offset + i);
+      var ds = fmt(d);
+      var inMonth = d.getMonth() === m;
+      var isToday = ds === todayStr;
+      var dayEntries = state.entries.filter(function (e) { return e.date === ds; });
+      var total = dayEntries.reduce(function (a, e) { return a + e.hours; }, 0);
+      var entriesHtml = dayEntries.map(function (e) {
+        var c = pc.map[e.project];
+        var chipStyle = 'background:' + c + ';' + chipBase;
+        var label = e.hours + 'h · ' + (e.ticket || e.project);
+        var tip = e.project + (e.ticket ? ' · ' + e.ticket : '') + ' — ' + e.hours + 'h' +
+          (e.description ? ' — ' + e.description : '') + '  (click to delete)';
+        return '<div data-action="deleteEntry" data-id="' + esc(e.id) + '" title="' + esc(tip) + '" style="' + esc(chipStyle) + '">' + esc(label) + '</div>';
+      }).join('');
+      // Days that meet or exceed the workday target get a "locked" look: a bold
+      // accent border plus a small lock glyph next to the day total.
+      var complete = total >= wd;
+      var borderStyle = complete ? '2px solid ' + T.accent : '1px solid ' + (isToday ? T.accent : T.border);
+      var cellStyle = 'background:' + (inMonth ? T.cellBg : T.cellOut) + ';border:' + borderStyle +
+        ';border-radius:' + RI + 'px;min-height:90px;padding:6px;' +
+        'position:relative;display:flex;flex-direction:column;gap:4px;overflow:hidden;opacity:' + (inMonth ? '1' : '.55') + ';';
+      var bg = inMonth ? T.cellBg : T.cellOut;
+      // Halo in the cell's own background color keeps the day number and total
+      // legible over the overtime stripes without masking the stripes elsewhere.
+      var headShadow = total > 0 ? 'text-shadow:0 0 3px ' + bg + ',0 0 2px ' + bg + ',0 1px 1px ' + bg + ';' : '';
+      var dayStyle = 'font-size:12px;font-weight:' + (isToday ? '700' : '600') + ';color:' +
+        (isToday ? T.accent : (inMonth ? T.ink : T.muted)) + ';' + headShadow;
+      var doneGlyph = complete ? '<span title="Workday complete" style="margin-right:3px;display:inline-block;' +
+        'vertical-align:middle;line-height:0;position:relative;top:-1px;filter:drop-shadow(0 0 1px ' + bg + ') drop-shadow(0 0 1px ' + bg + ')">' +
+        '<svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true">' +
+        '<path d="M4 13l5 5L20 6" fill="none" stroke="' + T.accent + '" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>' +
+        '</svg></span>' : '';
+      cells.push(
+        '<div ' + (total > 0 ? 'title="' + esc(dayTip(total)) + '" ' : '') + 'style="' + esc(cellStyle) + '">' +
+        (total > 0 ? dayFillLayers(total) : '') +
+        '<div style="' + esc(s.cellHead) + ';position:relative;z-index:1">' +
+        '<span style="' + esc(dayStyle) + '">' + d.getDate() + '</span>' +
+        '<span style="' + esc(s.cellTotal) + headShadow + '">' + doneGlyph + (total ? round2(total) + 'h' : '') + '</span>' +
+        '</div>' +
+        '<div style="display:flex;flex-direction:column;gap:3px;position:relative;z-index:1">' + entriesHtml + '</div>' +
+        '</div>'
+      );
+    }
+    return cells.join('');
+  }
+
+  function monthLabel() { return new Date(state.ym.y, state.ym.m, 1).toLocaleString('en-US', { month: 'long', year: 'numeric' }); }
+
+  function renderCalendarHead() {
+    if (!els.calHead) return;
+    var noticeHtml = state.notice ? '<span style="' + esc(s.notice) + '">' + esc(state.notice) + '</span>' : '';
+    els.calHead.innerHTML =
+      '<div style="display:flex;align-items:center;gap:10px">' +
+      '<div style="' + esc(s.cardTitle) + '">' + esc(monthLabel()) + '</div>' + noticeHtml + '</div>' +
+      '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+      '<button data-action="prevMonth" style="' + esc(s.navBtn) + '">‹</button>' +
+      '<button data-action="nextMonth" style="' + esc(s.navBtn) + '">›</button>' +
+      '<button data-action="today" style="' + esc(s.exportBtn) + '">Today</button>' +
+      '<button data-action="exportCsv" style="' + esc(s.exportBtn) + '">CSV</button>' +
+      '<button data-action="exportJson" style="' + esc(s.exportBtn) + '">Backup</button>' +
+      '<button data-action="triggerImport" style="' + esc(s.exportBtn) + '">Restore</button>' +
+      '<button data-action="openConfig" title="Workday settings" style="' + esc(s.exportBtn) + '">&#9881;</button>' +
+      '</div>';
+  }
+
+  function renderCalendar() {
+    renderCalendarHead();
+    if (els.grid) els.grid.innerHTML = buildCells();
+  }
+
+  function renderChart() {
+    var pc = projectColorMap();
+    var y = state.ym.y, m = state.ym.m;
+    var monthPrefix = y + '-' + pad(m + 1) + '-';
+    var monthEntries = state.entries.filter(function (e) { return e.date.indexOf(monthPrefix) === 0; });
+    var totals = {};
+    monthEntries.forEach(function (e) { totals[e.project] = (totals[e.project] || 0) + e.hours; });
+    var projList = Object.keys(totals).map(function (n) { return { name: n, color: pc.map[n], hours: round2(totals[n]) }; });
+    projList.sort(function (a, b) { return b.hours - a.hours; });
+    var maxH = Math.max.apply(null, [1].concat(projList.map(function (p) { return p.hours; })));
+    var grandTotal = round2(monthEntries.reduce(function (a, e) { return a + e.hours; }, 0));
+
+    els.chartTotal.innerHTML = '<div style="' + esc(s.totalPill) + '">' + grandTotal + 'h this month</div>';
+
+    if (!projList.length) {
+      els.chartBody.innerHTML = '<div style="' + esc(s.empty) + '">No time logged this month yet.</div>';
+      return;
+    }
+    els.chartBody.innerHTML = '<div style="display:flex;flex-direction:column;gap:11px;margin-top:6px">' +
+      projList.map(function (p) {
+        var swatch = 'width:11px;height:11px;border-radius:3px;flex:none;background:' + p.color + ';';
+        var barStyle = 'height:100%;width:' + (p.hours / maxH * 100) + '%;background:' + p.color + ';border-radius:5px;';
+        return '<div style="display:flex;align-items:center;gap:10px">' +
+          '<div style="' + esc(swatch) + '"></div>' +
+          '<div style="' + esc(s.barName) + '">' + esc(p.name) + '</div>' +
+          '<div style="' + esc(s.barTrack) + '"><div style="' + esc(barStyle) + '"></div></div>' +
+          '<div style="' + esc(s.barVal) + '">' + p.hours + 'h</div>' +
+          '</div>';
+      }).join('') + '</div>';
+  }
+
+  function renderDialog() {
+    var name = state.confirmProject;
+    if (!name) { els.dialog.innerHTML = ''; return; }
+    var cnt = state.entries.filter(function (e) { return e.project === name; }).length;
+    var cd = state.confirmDelete;
+    var confirmText = '“' + name + '” has ' + cnt + ' logged ' + (cnt === 1 ? 'entry' : 'entries') + '. Removing hides it from the project picker.';
+    var toggleSub = cd ? 'Permanently deletes ' + cnt + ' ' + (cnt === 1 ? 'entry' : 'entries') + '.' : 'Entries stay in your calendar & chart.';
+    var toggleTrack = 'width:42px;height:24px;border-radius:12px;background:' + (cd ? T.accent : T.track) + ';position:relative;cursor:pointer;flex:none;border:1px solid ' + T.border + ';';
+    var toggleKnob = 'position:absolute;top:2px;left:' + (cd ? '20px' : '2px') + ';width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.3);transition:left .15s;';
+    var confirmBtnLabel = cd ? 'Delete' : 'Remove';
+    var confirmBtnStyle = cd ? s.dangerBtn : s.primaryBtn;
+
+    els.dialog.innerHTML =
+      '<div style="' + esc(s.overlay) + '" data-action="overlay">' +
+      '<div style="' + esc(s.dialog) + '">' +
+      '<div style="' + esc(s.dlgTitle) + '">Remove project</div>' +
+      '<div style="' + esc(s.dlgText) + '">' + esc(confirmText) + '</div>' +
+      '<div style="' + esc(s.toggleRow) + '">' +
+      '<div><div style="' + esc(s.toggleLabel) + '">Delete logged entries</div>' +
+      '<div style="' + esc(s.toggleSub) + '">' + esc(toggleSub) + '</div></div>' +
+      '<div data-action="toggleDelete" style="' + esc(toggleTrack) + '"><div style="' + esc(toggleKnob) + '"></div></div>' +
+      '</div>' +
+      '<div style="' + esc(s.btnRow) + '">' +
+      '<button data-action="cancelRemove" style="' + esc(s.cancelBtn) + '">Cancel</button>' +
+      '<button data-action="confirmRemove" style="' + esc(confirmBtnStyle) + '">' + esc(confirmBtnLabel) + '</button>' +
+      '</div>' +
+      '</div></div>';
+  }
+
+  function renderConfig() {
+    if (!state.configOpen) { els.configModal.innerHTML = ''; els.workdayInput = null; els.configError = null; return; }
+    var pv = round2(state.workday * 1.25);
+    var previewCell = 'position:relative;overflow:hidden;height:56px;border:1px solid ' + T.border +
+      ';border-radius:' + RI + 'px;background:' + T.cellBg + ';padding:6px;';
+    var previewHtml =
+      '<div style="' + esc(s.toggleSub) + ';margin:16px 0 6px">Preview — a day at ' + pv + 'h (+25% over target)</div>' +
+      '<div style="' + esc(previewCell) + '">' + dayFillLayers(pv) +
+      '<span style="' + esc(s.cellTotal) + ';position:relative;z-index:1">' + pv + 'h</span></div>';
+    // Theme picker — one swatch per theme, swatch shows that theme's accent.
+    var allT = themes();
+    var ri = Math.min(T.radius, 10);
+    var themeHtml = '<div style="' + esc(s.label) + ';margin-top:18px"><span>Theme</span></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:7px">' +
+      THEME_NAMES.map(function (name) {
+        var tt = allT[name];
+        var sel = name === state.theme;
+        var btn = 'display:inline-flex;align-items:center;gap:7px;padding:6px 10px;border-radius:' + ri +
+          'px;cursor:pointer;font-size:12px;font-weight:600;text-transform:capitalize;color:' + T.ink +
+          ';border:' + (sel ? '2px solid ' + T.accent : '1px solid ' + T.border) +
+          ';background:' + (sel ? 'color-mix(in srgb,' + T.accent + ' 12%, transparent)' : 'transparent') + ';';
+        var dot = 'width:14px;height:14px;border-radius:50%;flex:none;background:' + tt.accent + ';border:1px solid ' + tt.border + ';';
+        return '<button data-action="setTheme" data-theme="' + esc(name) + '" style="' + esc(btn) + '"><span style="' + esc(dot) + '"></span>' + esc(name) + '</button>';
+      }).join('') + '</div>';
+    // Project-color palette picker — each option previews its 10 swatches.
+    var palHtml = '<div style="' + esc(s.label) + ';margin-top:18px"><span>Project colors</span></div>' +
+      '<div style="display:flex;flex-direction:column;gap:6px;margin-top:7px">' +
+      PALETTE_NAMES.map(function (name) {
+        var cols = PALETTES[name];
+        var sel = name === state.palette;
+        var btn = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 11px;border-radius:' + ri +
+          'px;cursor:pointer;font-size:12px;font-weight:600;text-transform:capitalize;color:' + T.ink +
+          ';border:' + (sel ? '2px solid ' + T.accent : '1px solid ' + T.border) +
+          ';background:' + (sel ? 'color-mix(in srgb,' + T.accent + ' 12%, transparent)' : 'transparent') + ';';
+        var dots = '<span style="display:inline-flex;gap:3px;flex:none">' +
+          cols.map(function (c) { return '<span style="width:11px;height:11px;border-radius:3px;background:' + c + '"></span>'; }).join('') + '</span>';
+        return '<button data-action="setPalette" data-palette="' + esc(name) + '" style="' + esc(btn) + '"><span>' + esc(name) + '</span>' + dots + '</button>';
+      }).join('') + '</div>';
+    els.configModal.innerHTML =
+      '<div style="' + esc(s.overlay) + '" data-action="configOverlay">' +
+      '<div style="' + esc(s.dialog) + '">' +
+      '<div style="' + esc(s.dlgTitle) + '">Settings</div>' +
+      '<div style="' + esc(s.dlgText) + '">Set your target hours per day, pick a color theme, and choose the palette used for project colors. Each calendar day with logged time fills toward the target; overtime is shown as a striped overlay.</div>' +
+      themeHtml +
+      palHtml +
+      '<div style="' + esc(s.field) + ';margin-top:16px">' +
+      '<span style="' + esc(s.label) + '"><span>Workday length (hours)</span></span>' +
+      '<input data-field="workday" type="number" min="0.5" max="24" step="0.5" value="' + esc(state.workday) + '" style="' + esc(s.input) + '"></div>' +
+      previewHtml +
+      '<div id="configError"></div>' +
+      '<div style="' + esc(s.btnRow) + '">' +
+      '<button data-action="cancelConfig" style="' + esc(s.cancelBtn) + '">Cancel</button>' +
+      '<button data-action="saveConfig" style="' + esc(s.primaryBtn) + '">Save</button>' +
+      '</div>' +
+      '</div></div>';
+    els.workdayInput = els.configModal.querySelector('[data-field="workday"]');
+    els.configError = els.configModal.querySelector('#configError');
+    if (els.workdayInput) els.workdayInput.focus();
+  }
+
+  // ---- Initial shell -----------------------------------------------------
+  function buildShell() {
+    var root = document.getElementById('root');
+    root.setAttribute('style', s.app);
+    root.innerHTML =
+      '<div style="' + esc(s.header) + '">' +
+        '<div style="display:flex;align-items:center;gap:10px">' +
+          logoSvg(30) +
+          '<div style="' + esc(s.brand) + '">Kronolog</div>' +
+        '</div>' +
+        '<a href="https://ko-fi.com/plabsmedia" target="_blank" rel="noopener noreferrer" title="Support on Ko-fi" ' +
+          'style="display:inline-flex;align-items:center;gap:7px;text-decoration:none;background:' + T.accent +
+          ';color:' + T.accentInk + ';padding:8px 14px;border-radius:' + Math.min(T.radius, 10) +
+          'px;font-size:13px;font-weight:700;box-shadow:' + T.shadow + '">' +
+          '<svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" style="display:block">' +
+          '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="' + T.accentInk + '"/>' +
+          '</svg>Tip</a>' +
+      '</div>' +
+      '<div id="layout" style="' + esc(s.layout) + '">' +
+        // ---- Form card ----
+        '<div id="formCard" style="' + esc(s.formCard) + '">' +
+          '<div style="' + esc(s.cardTitle) + '">Log time</div>' +
+          '<div style="display:flex;flex-direction:column;gap:13px;margin-top:14px">' +
+            '<div style="' + esc(s.field) + '"><span style="' + esc(s.label) + '"><span>Project</span></span>' +
+              '<input data-field="project" placeholder="New or existing project" style="' + esc(s.input) + '">' +
+              '<div id="chips"></div>' +
+            '</div>' +
+            '<label style="' + esc(s.field) + '"><span style="' + esc(s.label) + '"><span>Ticket</span><span style="' + esc(s.opt) + '">optional</span></span>' +
+              '<input data-field="ticket" placeholder="e.g. ACME-123" style="' + esc(s.input) + '"></label>' +
+            '<label style="' + esc(s.field) + '"><span style="' + esc(s.label) + '"><span>Date</span></span>' +
+              '<input data-field="date" type="date" style="' + esc(s.input) + '"></label>' +
+            '<div style="' + esc(s.field) + '">' +
+              '<div style="display:flex;justify-content:space-between;align-items:center">' +
+                '<span style="' + esc(s.label) + '"><span>Time</span></span>' +
+                '<div id="timeModes" style="display:flex;gap:4px"></div>' +
+              '</div>' +
+              '<div id="timeInputs"></div>' +
+            '</div>' +
+            '<label style="' + esc(s.field) + '"><span style="' + esc(s.label) + '"><span>Description</span></span>' +
+              '<textarea data-field="description" placeholder="What did you work on?" style="' + esc(s.textarea) + '"></textarea></label>' +
+            '<label style="' + esc(s.field) + '"><span style="' + esc(s.label) + '"><span>Tags</span><span style="' + esc(s.opt) + '">comma separated</span></span>' +
+              '<input data-field="tags" placeholder="design, review" style="' + esc(s.input) + '"></label>' +
+            '<button data-action="addEntry" style="' + esc(s.addBtn) + '">Add entry</button>' +
+            '<div id="error"></div>' +
+          '</div>' +
+        '</div>' +
+        // ---- Right column ----
+        '<div style="display:flex;flex-direction:column;gap:20px;min-width:0">' +
+          '<div style="' + esc(s.card) + '">' +
+            '<div id="calHead" style="' + esc(s.calHead) + '"></div>' +
+            '<div style="' + esc(s.weekRow) + '">' +
+              ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (w) {
+                return '<div style="' + esc(s.weekCell) + '">' + w + '</div>';
+              }).join('') +
+            '</div>' +
+            '<div id="grid" style="' + esc(s.grid) + '"></div>' +
+          '</div>' +
+          '<div style="' + esc(s.card) + '">' +
+            '<div style="' + esc(s.calHead) + '"><div style="' + esc(s.cardTitle) + '">Hours by project</div><div id="chartTotal"></div></div>' +
+            '<div id="chartBody"></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>' +
+      '<div style="margin-top:26px;padding:16px 40px 0;border-top:1px solid ' + T.border +
+        ';color:' + T.muted + ';font-size:11.5px;line-height:1.6;text-align:center">' +
+        'Your data — time entries, projects, and settings (workday target and theme) — is stored ' +
+        'only in this browser, in IndexedDB (with a localStorage copy as a fast cache and fallback). ' +
+        'Nothing is sent to any server and there is no account. Clearing this browser’s site data ' +
+        'will erase it, and it does not sync to other browsers or devices — use <b>Backup</b> to save a ' +
+        'JSON copy and <b>Restore</b> to load it elsewhere.' +
+      '</div>' +
+      '<input id="fileInput" type="file" accept="application/json,.json" style="display:none">' +
+      '<div id="dialog"></div>' +
+      '<div id="configModal"></div>';
+
+    // Cache references
+    els.project = root.querySelector('[data-field="project"]');
+    els.ticket = root.querySelector('[data-field="ticket"]');
+    els.date = root.querySelector('[data-field="date"]');
+    els.description = root.querySelector('[data-field="description"]');
+    els.tags = root.querySelector('[data-field="tags"]');
+    els.chips = root.querySelector('#chips');
+    els.timeModes = root.querySelector('#timeModes');
+    els.timeInputs = root.querySelector('#timeInputs');
+    els.error = root.querySelector('#error');
+    els.calHead = root.querySelector('#calHead');
+    els.grid = root.querySelector('#grid');
+    els.chartTotal = root.querySelector('#chartTotal');
+    els.chartBody = root.querySelector('#chartBody');
+    els.dialog = root.querySelector('#dialog');
+    els.configModal = root.querySelector('#configModal');
+    els.file = root.querySelector('#fileInput');
+
+    els.date.value = fmt(new Date());
+
+    // Delegated listeners bind to `root` (which survives innerHTML rebuilds), so
+    // bind them once even though buildShell may run again on theme change.
+    if (!rootBound) {
+      rootBound = true;
+      root.addEventListener('click', function (ev) {
+        var t = ev.target.closest('[data-action]');
+        if (!t) return;
+        var a = t.getAttribute('data-action');
+        switch (a) {
+          case 'addEntry': addEntry(); break;
+          case 'pickProject': pickProject(t.getAttribute('data-name')); break;
+          case 'removeProject': removeProject(t.getAttribute('data-name')); break;
+          case 'deleteEntry': deleteEntry(t.getAttribute('data-id')); break;
+          case 'timeMode': setTimeMode(t.getAttribute('data-mode')); break;
+          case 'prevMonth': prevMonth(); break;
+          case 'nextMonth': nextMonth(); break;
+          case 'today': goToday(); break;
+          case 'exportCsv': exportCsv(); break;
+          case 'exportJson': exportJson(); break;
+          case 'triggerImport': triggerImport(); break;
+          case 'toggleDelete': toggleDelete(); break;
+          case 'cancelRemove': cancelRemove(); break;
+          case 'confirmRemove': confirmRemove(); break;
+          case 'overlay': if (ev.target === t) cancelRemove(); break;
+          case 'openConfig': openConfig(); break;
+          case 'saveConfig': saveConfig(); break;
+          case 'cancelConfig': closeConfig(); break;
+          case 'configOverlay': if (ev.target === t) closeConfig(); break;
+          case 'setTheme': setTheme(t.getAttribute('data-theme')); break;
+          case 'setPalette': setPalette(t.getAttribute('data-palette')); break;
+        }
+      });
+      // Clear error as the user edits; keep chip highlight in sync with project field.
+      root.addEventListener('input', function (ev) {
+        if (!ev.target.matches('[data-field]')) return;
+        if (state.error) { state.error = ''; renderError(); }
+        if (ev.target === els.project) renderChips();
+      });
+    }
+
+    els.file.addEventListener('change', importJson);
+  }
+
+  function setFavicon() {
+    try {
+      var href = 'data:image/svg+xml,' + encodeURIComponent(logoSvg(null));
+      var link = document.querySelector('link[rel="icon"]');
+      if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
+      link.type = 'image/svg+xml';
+      link.href = href;
+    } catch (e) {}
+  }
+
+  // ---- Boot --------------------------------------------------------------
+  setFavicon();
+  buildShell();
+  renderChips();
+  renderTimeArea();
+  renderError();
+  renderCalendar();
+  renderChart();
+  renderDialog();
+  renderConfig();
+  initStorage();
+})();
+</script>
+</body>
+</html>

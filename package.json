@@ -1,0 +1,23 @@
+{
+  "name": "kronolog",
+  "version": "1.0.0",
+  "description": "Local-first time tracking web app (single-file, no build).",
+  "license": "MIT",
+  "author": "Todor Mazgalov",
+  "private": true,
+  "keywords": [
+    "time-tracking",
+    "timesheet",
+    "calendar",
+    "local-first",
+    "indexeddb",
+    "vanilla-js"
+  ],
+  "scripts": {
+    "test": "node test/run.js"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1",
+    "fake-indexeddb": "^6.2.5"
+  }
+}
