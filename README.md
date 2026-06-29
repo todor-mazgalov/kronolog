@@ -40,6 +40,12 @@ only network request; the app works offline without them (falls back to system f
 - **Project color palettes**: six palettes — vivid, pastel, earthy, sunset, cool,
   candy — chosen in **⚙ Settings**; they control the colors assigned to projects
   across chips, the calendar, and the chart. Persisted under `tt_palette`.
+- **Share (read-only)**: the **Share** button copies a link for the month you're
+  viewing, with the data packed into the URL fragment (`#share=…`, never sent to a
+  server). Opening it shows a read-only "Shared view" — calendar + chart, no
+  editing — and never loads or modifies the viewer's own data. The recipient can
+  **export the shared month to CSV or JSON**, and an "Exit shared view" button
+  returns them to their own timesheet.
 - **CSV export**, **JSON backup**, and **JSON restore** (import merges by entry id,
   so re-importing a backup never duplicates).
 

@@ -3,7 +3,7 @@
 const { spawnSync } = require('child_process');
 const path = require('path');
 
-const files = ['smoke.test.js', 'idb.test.js'];
+const files = ['smoke.test.js', 'idb.test.js', 'share.test.js'];
 let failed = false;
 
 for (const f of files) {

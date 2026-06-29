@@ -273,6 +273,7 @@
   // Persistent references to form inputs (uncontrolled — read on submit).
   var els = {};
   var rootBound = false;  // delegated listeners bind once; survive shell rebuilds
+  var sharedView = false; // true when opened via a #share= link (read-only)
 
   // ---- Derived data ------------------------------------------------------
   function projectColorMap() {
@@ -500,6 +501,68 @@
     reader.readAsText(file);
   }
 
+  // ---- Share (read-only, via URL hash) -----------------------------------
+  // The month's data is packed into the URL fragment (#share=…), which browsers
+  // never send to a server. Opening such a link renders a read-only view and
+  // never touches the viewer's stored data.
+  function encodeShare(obj) {
+    var b64 = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
+    return b64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  function decodeShare(str) {
+    try {
+      var b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+      return JSON.parse(decodeURIComponent(escape(atob(b64))));
+    } catch (e) { return null; }
+  }
+  // Returns {entries, workday, ym} if the URL carries a valid share, else null.
+  function parseShareHash() {
+    var h = location.hash || '';
+    var m = h.match(/^#share=(.+)$/);
+    if (!m) return null;
+    var p = decodeShare(m[1]);
+    if (!p || p.v !== 1 || !/^\d{4}-\d{2}$/.test(p.m) || !Array.isArray(p.e)) return null;
+    var entries = p.e.map(function (x, i) {
+      return {
+        id: 's' + i, date: String(x.dt || ''), project: String(x.p || ''),
+        ticket: x.tk || '', description: x.ds || '', tags: Array.isArray(x.tg) ? x.tg : [],
+        hours: Number(x.h) || 0, start: x.st || '', end: x.en || ''
+      };
+    });
+    return { entries: entries, workday: (p.wd > 0 ? p.wd : DEFAULT_WORKDAY), ym: { y: +p.m.slice(0, 4), m: +p.m.slice(5, 7) - 1 } };
+  }
+  function buildShareUrl(y, m) {
+    var prefix = y + '-' + pad(m + 1) + '-';
+    var monthEntries = state.entries.filter(function (e) { return e.date.indexOf(prefix) === 0; });
+    if (!monthEntries.length) return null;
+    var payload = {
+      v: 1, m: y + '-' + pad(m + 1), wd: state.workday,
+      e: monthEntries.map(function (e) {
+        return { dt: e.date, p: e.project, tk: e.ticket, ds: e.description, tg: e.tags, h: e.hours, st: e.start, en: e.end };
+      })
+    };
+    return location.origin + location.pathname + '#share=' + encodeShare(payload);
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { flashNotice('Share link copied'); }, function () { fallbackCopy(text); });
+    } else { fallbackCopy(text); }
+  }
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+      flashNotice('Share link copied');
+    } catch (e) { flashNotice('Couldn’t copy — link logged to console'); console.log('Share link:', text); }
+  }
+  function shareMonth() {
+    var url = buildShareUrl(state.ym.y, state.ym.m);
+    if (!url) { flashNotice('No entries to share this month'); return; }
+    copyText(url);
+  }
+  function exitShare() { window.location.href = location.pathname + location.search; }
+
   // ---- Rendering ---------------------------------------------------------
   function chipsHtml() {
     var pc = projectColorMap();
@@ -612,11 +675,12 @@
       var total = dayEntries.reduce(function (a, e) { return a + e.hours; }, 0);
       var entriesHtml = dayEntries.map(function (e) {
         var c = pc.map[e.project];
-        var chipStyle = 'background:' + c + ';' + chipBase;
+        var chipStyle = 'background:' + c + ';' + chipBase + (sharedView ? 'cursor:default;' : '');
         var label = e.hours + 'h · ' + (e.ticket || e.project);
         var tip = e.project + (e.ticket ? ' · ' + e.ticket : '') + ' — ' + e.hours + 'h' +
-          (e.description ? ' — ' + e.description : '') + '  (click to delete)';
-        return '<div data-action="deleteEntry" data-id="' + esc(e.id) + '" title="' + esc(tip) + '" style="' + esc(chipStyle) + '">' + esc(label) + '</div>';
+          (e.description ? ' — ' + e.description : '') + (sharedView ? '' : '  (click to delete)');
+        var act = sharedView ? '' : ' data-action="deleteEntry" data-id="' + esc(e.id) + '"';
+        return '<div' + act + ' title="' + esc(tip) + '" style="' + esc(chipStyle) + '">' + esc(label) + '</div>';
       }).join('');
       // Days that meet or exceed the workday target get a "locked" look: a bold
       // accent border plus a small lock glyph next to the day total.
@@ -654,6 +718,11 @@
 
   function renderCalendarHead() {
     if (!els.calHead) return;
+    // Shared read-only view: just the month label, no action buttons.
+    if (sharedView) {
+      els.calHead.innerHTML = '<div style="' + esc(s.cardTitle) + '">' + esc(monthLabel()) + '</div>';
+      return;
+    }
     var noticeHtml = state.notice ? '<span style="' + esc(s.notice) + '">' + esc(state.notice) + '</span>' : '';
     els.calHead.innerHTML =
       '<div style="display:flex;align-items:center;gap:10px">' +
@@ -665,7 +734,8 @@
       '<button data-action="exportCsv" style="' + esc(s.exportBtn) + '">CSV</button>' +
       '<button data-action="exportJson" style="' + esc(s.exportBtn) + '">Backup</button>' +
       '<button data-action="triggerImport" style="' + esc(s.exportBtn) + '">Restore</button>' +
-      '<button data-action="openConfig" title="Workday settings" style="' + esc(s.exportBtn) + '">&#9881;</button>' +
+      '<button data-action="share" title="Copy a read-only share link for this month" style="' + esc(s.exportBtn) + '">Share</button>' +
+      '<button data-action="openConfig" title="Settings" style="' + esc(s.exportBtn) + '">&#9881;</button>' +
       '</div>';
   }
 
@@ -794,32 +864,117 @@
     if (els.workdayInput) els.workdayInput.focus();
   }
 
+  // Header markup (logo + wordmark on the left; GitHub + Tip on the right),
+  // shared by the normal and read-only shells.
+  function headerHtml() {
+    return '<div style="' + esc(s.header) + '">' +
+      '<div style="display:flex;align-items:center;gap:10px">' +
+        logoSvg(30) +
+        '<div style="' + esc(s.brand) + '">Kronolog</div>' +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px">' +
+        '<a href="https://github.com/todor-mazgalov/kronolog" target="_blank" rel="noopener noreferrer" title="View source on GitHub" ' +
+          'style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;text-decoration:none;color:' + T.ink +
+          ';background:' + T.card + ';border:1px solid ' + T.border + ';border-radius:' + Math.min(T.radius, 10) + 'px">' +
+          '<svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" fill="' + T.ink + '" style="display:block">' +
+          '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>' +
+          '</svg></a>' +
+        '<a href="https://ko-fi.com/plabsmedia" target="_blank" rel="noopener noreferrer" title="Support on Ko-fi" ' +
+          'style="display:inline-flex;align-items:center;gap:7px;text-decoration:none;background:' + T.accent +
+          ';color:' + T.accentInk + ';padding:8px 14px;border-radius:' + Math.min(T.radius, 10) +
+          'px;font-size:13px;font-weight:700;box-shadow:' + T.shadow + '">' +
+          '<svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" style="display:block">' +
+          '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="' + T.accentInk + '"/>' +
+          '</svg>Tip</a>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // Delegated listeners bind to `root` (which survives innerHTML rebuilds), so
+  // bind them once even though buildShell may run again on theme change.
+  function bindRootListeners(root) {
+    if (rootBound) return;
+    rootBound = true;
+    root.addEventListener('click', function (ev) {
+      var t = ev.target.closest('[data-action]');
+      if (!t) return;
+      var a = t.getAttribute('data-action');
+      switch (a) {
+        case 'addEntry': addEntry(); break;
+        case 'pickProject': pickProject(t.getAttribute('data-name')); break;
+        case 'removeProject': removeProject(t.getAttribute('data-name')); break;
+        case 'deleteEntry': deleteEntry(t.getAttribute('data-id')); break;
+        case 'timeMode': setTimeMode(t.getAttribute('data-mode')); break;
+        case 'prevMonth': prevMonth(); break;
+        case 'nextMonth': nextMonth(); break;
+        case 'today': goToday(); break;
+        case 'exportCsv': exportCsv(); break;
+        case 'exportJson': exportJson(); break;
+        case 'triggerImport': triggerImport(); break;
+        case 'share': shareMonth(); break;
+        case 'exitShare': exitShare(); break;
+        case 'toggleDelete': toggleDelete(); break;
+        case 'cancelRemove': cancelRemove(); break;
+        case 'confirmRemove': confirmRemove(); break;
+        case 'overlay': if (ev.target === t) cancelRemove(); break;
+        case 'openConfig': openConfig(); break;
+        case 'saveConfig': saveConfig(); break;
+        case 'cancelConfig': closeConfig(); break;
+        case 'configOverlay': if (ev.target === t) closeConfig(); break;
+        case 'setTheme': setTheme(t.getAttribute('data-theme')); break;
+        case 'setPalette': setPalette(t.getAttribute('data-palette')); break;
+      }
+    });
+    root.addEventListener('input', function (ev) {
+      if (!ev.target.matches('[data-field]')) return;
+      if (state.error) { state.error = ''; renderError(); }
+      if (ev.target === els.project) renderChips();
+    });
+  }
+
+  // Read-only shell shown when the app is opened via a #share= link.
+  function buildSharedShell(root) {
+    var weekRow = '<div style="' + esc(s.weekRow) + '">' +
+      ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(function (w) {
+        return '<div style="' + esc(s.weekCell) + '">' + w + '</div>';
+      }).join('') + '</div>';
+    var banner = 'display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;' +
+      'background:color-mix(in srgb,' + T.accent + ' 12%, transparent);border:1px solid ' + T.border +
+      ';border-radius:' + RI + 'px;padding:12px 16px;margin-bottom:20px;color:' + T.ink + ';font-size:13px;';
+    root.innerHTML =
+      headerHtml() +
+      '<div style="' + esc(banner) + '">' +
+        '<div><b>Shared timesheet</b> — read-only. Your own data isn’t loaded or changed.</div>' +
+        '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' +
+          '<button data-action="exportCsv" style="' + esc(s.exportBtn) + '">CSV</button>' +
+          '<button data-action="exportJson" style="' + esc(s.exportBtn) + '">JSON</button>' +
+          '<button data-action="exitShare" style="' + esc(s.exportBtn) + '">Exit shared view</button>' +
+        '</div>' +
+      '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:20px">' +
+        '<div style="' + esc(s.card) + '">' +
+          '<div id="calHead" style="' + esc(s.calHead) + '"></div>' + weekRow +
+          '<div id="grid" style="' + esc(s.grid) + '"></div>' +
+        '</div>' +
+        '<div style="' + esc(s.card) + '">' +
+          '<div style="' + esc(s.calHead) + '"><div style="' + esc(s.cardTitle) + '">Hours by project</div><div id="chartTotal"></div></div>' +
+          '<div id="chartBody"></div>' +
+        '</div>' +
+      '</div>';
+    els.calHead = root.querySelector('#calHead');
+    els.grid = root.querySelector('#grid');
+    els.chartTotal = root.querySelector('#chartTotal');
+    els.chartBody = root.querySelector('#chartBody');
+    bindRootListeners(root);
+  }
+
   // ---- Initial shell -----------------------------------------------------
   function buildShell() {
     var root = document.getElementById('root');
     root.setAttribute('style', s.app);
+    if (sharedView) { buildSharedShell(root); return; }
     root.innerHTML =
-      '<div style="' + esc(s.header) + '">' +
-        '<div style="display:flex;align-items:center;gap:10px">' +
-          logoSvg(30) +
-          '<div style="' + esc(s.brand) + '">Kronolog</div>' +
-        '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px">' +
-          '<a href="https://github.com/todor-mazgalov/kronolog" target="_blank" rel="noopener noreferrer" title="View source on GitHub" ' +
-            'style="display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;text-decoration:none;color:' + T.ink +
-            ';background:' + T.card + ';border:1px solid ' + T.border + ';border-radius:' + Math.min(T.radius, 10) + 'px">' +
-            '<svg width="18" height="18" viewBox="0 0 16 16" aria-hidden="true" fill="' + T.ink + '" style="display:block">' +
-            '<path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>' +
-            '</svg></a>' +
-          '<a href="https://ko-fi.com/plabsmedia" target="_blank" rel="noopener noreferrer" title="Support on Ko-fi" ' +
-            'style="display:inline-flex;align-items:center;gap:7px;text-decoration:none;background:' + T.accent +
-            ';color:' + T.accentInk + ';padding:8px 14px;border-radius:' + Math.min(T.radius, 10) +
-            'px;font-size:13px;font-weight:700;box-shadow:' + T.shadow + '">' +
-            '<svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" style="display:block">' +
-            '<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 1 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" fill="' + T.accentInk + '"/>' +
-            '</svg>Tip</a>' +
-        '</div>' +
-      '</div>' +
+      headerHtml() +
       '<div id="layout" style="' + esc(s.layout) + '">' +
         // ---- Form card ----
         '<div id="formCard" style="' + esc(s.formCard) + '">' +
@@ -897,46 +1052,7 @@
 
     els.date.value = fmt(new Date());
 
-    // Delegated listeners bind to `root` (which survives innerHTML rebuilds), so
-    // bind them once even though buildShell may run again on theme change.
-    if (!rootBound) {
-      rootBound = true;
-      root.addEventListener('click', function (ev) {
-        var t = ev.target.closest('[data-action]');
-        if (!t) return;
-        var a = t.getAttribute('data-action');
-        switch (a) {
-          case 'addEntry': addEntry(); break;
-          case 'pickProject': pickProject(t.getAttribute('data-name')); break;
-          case 'removeProject': removeProject(t.getAttribute('data-name')); break;
-          case 'deleteEntry': deleteEntry(t.getAttribute('data-id')); break;
-          case 'timeMode': setTimeMode(t.getAttribute('data-mode')); break;
-          case 'prevMonth': prevMonth(); break;
-          case 'nextMonth': nextMonth(); break;
-          case 'today': goToday(); break;
-          case 'exportCsv': exportCsv(); break;
-          case 'exportJson': exportJson(); break;
-          case 'triggerImport': triggerImport(); break;
-          case 'toggleDelete': toggleDelete(); break;
-          case 'cancelRemove': cancelRemove(); break;
-          case 'confirmRemove': confirmRemove(); break;
-          case 'overlay': if (ev.target === t) cancelRemove(); break;
-          case 'openConfig': openConfig(); break;
-          case 'saveConfig': saveConfig(); break;
-          case 'cancelConfig': closeConfig(); break;
-          case 'configOverlay': if (ev.target === t) closeConfig(); break;
-          case 'setTheme': setTheme(t.getAttribute('data-theme')); break;
-          case 'setPalette': setPalette(t.getAttribute('data-palette')); break;
-        }
-      });
-      // Clear error as the user edits; keep chip highlight in sync with project field.
-      root.addEventListener('input', function (ev) {
-        if (!ev.target.matches('[data-field]')) return;
-        if (state.error) { state.error = ''; renderError(); }
-        if (ev.target === els.project) renderChips();
-      });
-    }
-
+    bindRootListeners(root);
     els.file.addEventListener('change', importJson);
   }
 
@@ -951,16 +1067,33 @@
   }
 
   // ---- Boot --------------------------------------------------------------
-  setFavicon();
-  buildShell();
-  renderChips();
-  renderTimeArea();
-  renderError();
-  renderCalendar();
-  renderChart();
-  renderDialog();
-  renderConfig();
-  initStorage();
+  var shared = parseShareHash();
+  if (shared) {
+    // Read-only shared view: render the link's month from the URL only. Never
+    // load the viewer's stored entries and never call initStorage()/persist(),
+    // so their own data is neither shown nor modified. (Theme/palette are still
+    // read from their prefs purely for display.)
+    sharedView = true;
+    state.entries = shared.entries;
+    state.hidden = [];
+    state.workday = shared.workday;
+    state.ym = shared.ym;
+    setFavicon();
+    buildShell();
+    renderCalendar();
+    renderChart();
+  } else {
+    setFavicon();
+    buildShell();
+    renderChips();
+    renderTimeArea();
+    renderError();
+    renderCalendar();
+    renderChart();
+    renderDialog();
+    renderConfig();
+    initStorage();
+  }
 })();
 </script>
 </body>
