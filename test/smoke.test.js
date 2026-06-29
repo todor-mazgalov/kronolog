@@ -24,6 +24,8 @@ ok(/Kronolog/.test(q('#root').textContent), 'brand "Kronolog" present');
 ok(!!q('#root svg'), 'header shows the logo svg');
 const tip = doc.querySelector('a[href="https://ko-fi.com/plabsmedia"]');
 ok(!!tip && /Tip/.test(tip.textContent) && tip.getAttribute('target') === '_blank' && /noopener/.test(tip.getAttribute('rel') || ''), 'header has Ko-fi tip button (new tab, noopener)');
+const gh = doc.querySelector('a[href="https://github.com/todor-mazgalov/kronolog"]');
+ok(!!gh && !!gh.querySelector('svg') && !gh.textContent.trim() && gh.getAttribute('target') === '_blank' && /noopener/.test(gh.getAttribute('rel') || ''), 'header has icon-only GitHub button to the repo (new tab, noopener)');
 const favLink = doc.querySelector('link[rel="icon"]');
 ok(!!favLink && /image\/svg\+xml/.test(favLink.getAttribute('type') || '') && /^data:image\/svg\+xml,/.test(favLink.getAttribute('href') || ''), 'svg favicon link injected as data URI');
 ok(favLink && /%3Csvg/.test(favLink.getAttribute('href')), 'favicon href is url-encoded svg markup');
